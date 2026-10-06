@@ -1,48 +1,136 @@
-import express from 'express';
-import config from './config.js';
-import { AppError, errorHandler, notFoundHandler } from './errors.js';
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
-const app = express();
+import { initializeDatabase, pool } from '../src/db.js';
 
-app.disable('x-powered-by');
-app.use(express.json({ limit: '1mb' }));
+const hasDatabaseConfig = Boolean(process.env.DATABASE_URL);
 
-app.get('/', (req, res) => {
-  res.status(200).json({
-    name: config.appName,
-    status: 'ready',
-    environment: config.environment,
-    documentation: '/api/health',
-    message: 'Foundation project scaffold for the civic reporting platform.',
-  });
+test('initializeDatabase is not allowed without a configured DATABASE_URL', async () => {
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+
+  delete process.env.DATABASE_URL;
+
+  try {
+    await assert.rejects(() => initializeDatabase(), {
+      name: 'AppError',
+      code: 'DB_NOT_CONFIGURED',
+    });
+  } finally {
+    if (originalDatabaseUrl) {
+      process.env.DATABASE_URL = originalDatabaseUrl;
+    }
+  }
 });
 
-app.get('/api/health', async (req, res) => {
-  const databaseState = config.databaseUrl
-    ? {
-        status: 'configured',
-        message: 'Database connection string is present.',
-      }
-    : {
-        status: 'not_configured',
-        message: 'Set DATABASE_URL to enable database-level checks.',
-      };
+test('database schema can be initialized when a database is configured', {
+  skip: !hasDatabaseConfig,
+}, async () => {
+  const result = await initializeDatabase();
 
-  res.status(200).json({
-    success: true,
-    service: 'verifica-ritorno-scuola',
-    status: 'ok',
-    environment: config.environment,
-    uptimeSeconds: process.uptime(),
-    database: databaseState,
-  });
+  assert.equal(result.status, 'ok');
+  assert.match(result.message, /Database schema initialized successfully/i);
+
+  const tables = await pool.query(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name IN (
+        'quartiere',
+        'utente',
+        'categoria',
+        'segnalazione',
+        'allegato_multimediale',
+        'sostegno',
+        'dossier',
+        'dossier_segnalazione'
+      )
+    ORDER BY table_name;
+  `);
+
+  assert.deepEqual(
+    tables.rows.map((row) => row.table_name),
+    [
+      'allegato_multimediale',
+      'categoria',
+      'dossier',
+      'dossier_segnalazione',
+      'quartiere',
+      'segnalazione',
+      'sostegno',
+      'utente',
+    ]
+  );
+
+  const insertQuartiere = await pool.query(
+    `INSERT INTO quartiere (nome_quartiere, cap_zona)
+     VALUES ('Quartiere Test', '00100')
+     ON CONFLICT (nome_quartiere, cap_zona) DO NOTHING
+     RETURNING id;`
+  );
+
+  const quartiereId = insertQuartiere.rows[0]?.id ?? (
+    await pool.query(`SELECT id FROM quartiere WHERE nome_quartiere = 'Quartiere Test' AND cap_zona = '00100';`)
+  ).rows[0].id;
+
+  const insertCategoria = await pool.query(
+    `INSERT INTO categoria (nome_categoria, descrizione)
+     VALUES ('Buche stradali', 'Criticità relative alla viabilità urbana.')
+     ON CONFLICT (nome_categoria) DO NOTHING
+     RETURNING id;`
+  );
+
+  const categoriaId = insertCategoria.rows[0]?.id ?? (
+    await pool.query(`SELECT id FROM categoria WHERE nome_categoria = 'Buche stradali';`)
+  ).rows[0].id;
+
+  const insertUser = await pool.query(
+    `INSERT INTO utente (nome, cognome, email, password_hash, tipo_ruolo, fk_quartiere)
+     VALUES ('Mario', 'Rossi', 'mario.rossi.test@example.com', 'hashed_password', 'Cittadino', $1)
+     ON CONFLICT (email) DO NOTHING
+     RETURNING id;`,
+    [quartiereId]
+  );
+
+  const userId = insertUser.rows[0]?.id ?? (
+    await pool.query(`SELECT id FROM utente WHERE email = 'mario.rossi.test@example.com';`)
+  ).rows[0].id;
+
+  const insertSegnalazione = await pool.query(
+    `INSERT INTO segnalazione (
+       titolo,
+       descrizione_testuale,
+       latitudine,
+       longitudine,
+       indirizzo,
+       fk_utente_autore,
+       fk_categoria,
+       fk_quartiere
+     ) VALUES (
+       'Buche in via Test',
+       'La strada presenta diverse buche e rischio per i pedoni.',
+       45.123456,
+       9.123456,
+       'Via Test 1',
+       $1,
+       $2,
+       $3
+     ) RETURNING id;`,
+    [userId, categoriaId, quartiereId]
+  );
+
+  const segnalazioneId = insertSegnalazione.rows[0].id;
+
+  await pool.query(
+    `INSERT INTO sostegno (fk_utente, fk_segnalazione)
+     VALUES ($1, $2)
+     ON CONFLICT (fk_utente, fk_segnalazione) DO NOTHING;`,
+    [userId, segnalazioneId]
+  );
+
+  const supportCheck = await pool.query(
+    `SELECT COUNT(*)::int AS count FROM sostegno WHERE fk_segnalazione = $1;`,
+    [segnalazioneId]
+  );
+
+  assert.equal(supportCheck.rows[0].count, 1);
 });
-
-app.get('/api/error-demo', (req, res, next) => {
-  next(new AppError(400, 'BAD_REQUEST', 'This is an intentionally generated client error.'));
-});
-
-app.use(notFoundHandler);
-app.use(errorHandler);
-
-export default app;

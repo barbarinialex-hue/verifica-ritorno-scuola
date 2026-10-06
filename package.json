@@ -1,24 +1,152 @@
-{
-  "name": "verifica-ritorno-scuola",
-  "version": "0.1.0",
-  "description": "Foundation for the Verifica Ritorno Scuola civic issue reporting platform.",
-  "type": "module",
-  "main": "src/server.js",
-  "scripts": {
-    "dev": "node --watch src/server.js",
-    "start": "node src/server.js",
-    "test": "node --test",
-    "check": "node --check src/**/*.js"
-  },
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "pg": "^8.12.0"
-  },
-  "devDependencies": {
-    "supertest": "^7.0.0"
-  }
-}
+# Verifica Ritorno Scuola
+
+## Stato del progetto
+
+Questa repository è stata avviata come foundation per la piattaforma di segnalazioni civiche `Verifica Ritorno Scuola`.
+
+La prima fase implementata è la base tecnica del progetto: configurazione del runtime, scaffolding dell'applicazione web, endpoint di salute del servizio, gestione centralizzata degli errori e documentazione di setup.
+
+La seconda fase implementata riguarda il modello dati reale e la base del database PostgreSQL: schema completo delle entità previste dal progetto, migrazione iniziale, inizializzazione automatica dello schema e verifica di salute del database.
+
+L'obiettivo di questa base è rendere il repository pronto per lo sviluppo delle funzionalità reali: autenticazione, gestione delle segnalazioni, upload multimediale, moderazione, dossier e dashboard amministrativa.
+
+## Stack scelto
+
+- Node.js 20+
+- Express 4
+- PostgreSQL 16 (via Docker Compose per il setup locale)
+- Supertest + Node test runner per la verifica automatica
+
+## Struttura del repository
+
+```text
+.
+├── src/
+│   ├── app.js                # applicazione Express + route principali
+│   ├── config.js             # configurazione e validazione env
+│   ├── db/
+│   │   ├── init.js           # utility CLI per inizializzare il database
+│   │   └── schema.sql        # schema PostgreSQL con entità e vincoli
+│   ├── db.js                 # connessione e health check del database
+│   ├── errors.js             # gestione centralizzata degli errori
+│   └── server.js             # bootstrap del server
+├── test/
+│   ├── db.test.js            # test di inizializzazione e schema del database
+│   └── health.test.js        # test del servizio e gestione errori
+├── .env.example              # variabili d'ambiente di esempio
+├── .gitignore
+├── docker-compose.yml        # database PostgreSQL locale
+├── package.json
+├── README.md
+└── LICENSE (se aggiunto in futuro)
+```
+
+## Requisiti
+
+- Node.js >= 20
+- Docker Desktop (opzionale ma consigliato per il database PostgreSQL locale)
+
+## Setup locale
+
+1. Installa le dipendenze:
+
+```bash
+npm install
+```
+
+2. Copia il file delle variabili d'ambiente:
+
+```bash
+cp .env.example .env
+```
+
+3. Avvia il database PostgreSQL locale:
+
+```bash
+docker compose up -d postgres
+```
+
+4. Inizializza lo schema del database:
+
+```bash
+npm run db:init
+```
+
+5. Avvia il servizio:
+
+```bash
+npm run dev
+```
+
+Oppure in modalità production:
+
+```bash
+npm start
+```
+
+## Database e modello dati
+
+Questo progetto implementa la struttura logica prevista dal modello di dominio del sistema:
+
+- `quartiere`: aree geografiche di riferimento
+- `utente`: profili cittadini, comitato e amministratori
+- `categoria`: classificazione delle criticità urbane
+- `segnalazione`: richiesta di segnalazione con coordinate geografiche
+- `allegato_multimediale`: foto e video associati a una segnalazione
+- `sostegno`: appoggio di un utente a una segnalazione
+- `dossier`: aggregazione di segnalazioni rilevanti
+- `dossier_segnalazione`: relazione molti-a-molti tra dossier e segnalazioni
+
+Le relazioni e i vincoli sono definiti in `src/db/schema.sql` e includono:
+
+- unicità email per utente;
+- unicità della coppia utente + segnalazione per il sostegno;
+- vincoli di integrità referenziale tra le entità;
+- enumerazioni per ruoli, stati e tipi file;
+- indici sulle chiavi di accesso più frequenti.
+
+## Verifica del servizio
+
+Il backend offre un endpoint di health check e una root endpoint informativa:
+
+```bash
+curl http://localhost:3000/api/health
+curl http://localhost:3000/
+```
+
+Per inizializzare lo schema del database in una configurazione locale:
+
+```bash
+curl -X POST http://localhost:3000/api/database/init
+```
+
+## Test
+
+```bash
+npm test
+```
+
+## State of the project
+
+Questo commit implementa la seconda fase della roadmap: il database reale del progetto.
+
+In particolare:
+
+- creazione del modello dati PostgreSQL completo;
+- definizione delle relazioni e dei vincoli del sistema;
+- migrazione iniziale via `schema.sql`;
+- connection pool e health check del database;
+- endpoint di inizializzazione schema (`POST /api/database/init`);
+- test automatizzati di validazione del modello dati.
+
+## Prossimi passi previsti
+
+1. definire e implementare l'autenticazione utenti;
+2. sviluppare il CRUD delle segnalazioni;
+3. aggiungere upload foto/video e validazione dei file;
+4. introdurre moderazione, sostegni e dossier;
+5. completare dashboard cittadino, comitato e admin.
+
+## Nota metodologica
+
+Il progetto è stato analizzato in profondità e la seconda attività fondamentale da implementare è la base dati. Senza un modello persistente coerente, tutte le funzionalità successive (auth, segnalazioni, moderazione e dossier) non sarebbero affidabili o verificabili. La struttura attuale è quindi una base solida per proseguire con lo sviluppo reale del prodotto.
