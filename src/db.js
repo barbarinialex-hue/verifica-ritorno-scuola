@@ -10,6 +10,8 @@ La seconda fase implementata riguarda il modello dati reale e la base del databa
 
 La terza fase implementata aggiunge l'autenticazione reale degli utenti. È ora possibile registrare un account, effettuare il login, ricevere un token JWT, e recuperare il profilo autenticato tramite endpoint protetti.
 
+La quarta fase implementata riguarda la gestione delle segnalazioni: creazione, lista, dettaglio, modifica e cancellazione di segnalazioni con autenticazione e validazione dei campi.
+
 L'obiettivo di questa base è rendere il repository pronto per lo sviluppo delle funzionalità reali: autenticazione, gestione delle segnalazioni, upload multimediale, moderazione, dossier e dashboard amministrativa.
 
 ## Stack scelto
@@ -33,11 +35,13 @@ L'obiettivo di questa base è rendere il repository pronto per lo sviluppo delle
 │   │   └── schema.sql        # schema PostgreSQL con entità e vincoli
 │   ├── db.js                 # connessione e health check del database
 │   ├── errors.js             # gestione centralizzata degli errori
+│   ├── segnalazioni.js       # CRUD delle segnalazioni e validazione
 │   └── server.js             # bootstrap del server
 ├── test/
 │   ├── auth.test.js          # test di registrazione, login e autenticazione
 │   ├── db.test.js            # test di inizializzazione e schema del database
-│   └── health.test.js        # test del servizio e gestione errori
+│   ├── health.test.js        # test del servizio e gestione errori
+│   └── segnalazioni.test.js  # test di CRUD segnalazioni
 ├── .env.example              # variabili d'ambiente di esempio
 ├── .gitignore
 ├── docker-compose.yml        # database PostgreSQL locale
@@ -126,6 +130,60 @@ curl http://localhost:3000/api/auth/me \
   -H 'Authorization: Bearer <token>'
 ```
 
+## Gestione segnalazioni
+
+Le segnalazioni supportano il ciclo completo CRUD:
+
+### Creazione di una segnalazione
+
+```bash
+curl -X POST http://localhost:3000/api/segnalazioni \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <token>' \
+  -d '{
+    "titolo": "Lampione guasto",
+    "descrizioneTestuale": "Il lampione del viale principale non funziona da diversi giorni.",
+    "latitudine": 45.123456,
+    "longitudine": 9.123456,
+    "indirizzo": "Via Roma 12",
+    "categoriaId": 1,
+    "quartiereId": 1
+  }'
+```
+
+### Lista delle segnalazioni
+
+```bash
+curl http://localhost:3000/api/segnalazioni
+```
+
+### Dettaglio di una segnalazione
+
+```bash
+curl http://localhost:3000/api/segnalazioni/1
+```
+
+### Aggiornamento
+
+```bash
+curl -X PATCH http://localhost:3000/api/segnalazioni/1 \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <token>' \
+  -d '{
+    "titolo": "Lampione guasto - urgente",
+    "statoAttuale": "Approvata"
+  }'
+```
+
+### Cancellazione
+
+```bash
+curl -X DELETE http://localhost:3000/api/segnalazioni/1 \
+  -H 'Authorization: Bearer <token>'
+```
+
+Le segnalazioni richiedono autenticazione per creare, aggiornare e cancellare; la lettura della lista e del dettaglio è accessibile in lettura pubblica.
+
 La password viene salvata in formato hash con bcrypt; i token JWT sono firmati con `JWT_SECRET` e hanno scadenza configurabile con `JWT_EXPIRES_IN`.
 
 ## Database e modello dati
@@ -172,24 +230,24 @@ npm test
 
 ## State of the project
 
-Questo commit implementa la terza fase della roadmap: l'autenticazione reale degli utenti.
+Questo commit implementa la quarta fase della roadmap: il lifecycle completo delle segnalazioni.
 
 In particolare:
 
-- registrazione con hashing password e validazione dei campi;
-- login con verifica credenziali e token JWT;
-- endpoint `/api/auth/me` protetto tramite bearer token;
-- controllo di errore per auth, email duplicata, ruolo e quartiere non valido;
-- test di regressione per registrazione, login, token e errori di autenticazione;
-- documentazione aggiornata con esempi di utilizzo.
+- creazione di una segnalazione con validazione dei campi;
+- lettura pubblica di lista e dettaglio;
+- aggiornamento delle informazioni e degli stati;
+- cancellazione con autorizzazione per autore o ruoli amministrativi;
+- gestione degli errori per dati non validi, route mancanti e interferenze di permessi;
+- test automatici per CRUD segnalazioni;
+- documentazione aggiornata con esempi diretti dell'API.
 
 ## Prossimi passi previsti
 
-1. definire e implementare il CRUD delle segnalazioni;
-2. aggiungere upload foto/video e validazione dei file;
-3. introdurre moderazione, sostegni e dossier;
-4. completare dashboard cittadino, comitato e admin.
+1. aggiungere upload foto/video e validazione dei file;
+2. introdurre moderazione, sostegni e dossier;
+3. completare dashboard cittadino, comitato e admin.
 
 ## Nota metodologica
 
-Il progetto è stato analizzato in profondità e la terza attività fondamentale da implementare è l'autenticazione. Senza un sistema di identità, ruoli e token sicuri, le segnalazioni, i moderatori e i dossier non possono essere gestiti in modo affidabile. L'implementazione attuale fornisce una base solida e testata per il resto del prodotto.
+Il progetto è stato analizzato in profondità e la quarta attività fondamentale da implementare è il ciclo di vita delle segnalazioni. Senza la capacità di creare, controllare e aggiornare segnalazioni in modo sicuro, la piattaforma non può far davvero emergere il valore del servizio. L'implementazione attuale fornisce la base funzionale per il resto del prodotto.
