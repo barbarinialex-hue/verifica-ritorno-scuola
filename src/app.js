@@ -1,136 +1,149 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
-import { initializeDatabase, pool } from '../src/db.js';
+import config from './config.js';
+import { AppError } from './errors.js';
+import { pool } from './db.js';
 
-const hasDatabaseConfig = Boolean(process.env.DATABASE_URL);
+const VALID_ROLES = ['Cittadino', 'MembroComitato', 'Admin'];
 
-test('initializeDatabase is not allowed without a configured DATABASE_URL', async () => {
-  const originalDatabaseUrl = process.env.DATABASE_URL;
-
-  delete process.env.DATABASE_URL;
-
-  try {
-    await assert.rejects(() => initializeDatabase(), {
-      name: 'AppError',
-      code: 'DB_NOT_CONFIGURED',
-    });
-  } finally {
-    if (originalDatabaseUrl) {
-      process.env.DATABASE_URL = originalDatabaseUrl;
-    }
+function sanitizeUser(row) {
+  if (!row) {
+    return null;
   }
-});
 
-test('database schema can be initialized when a database is configured', {
-  skip: !hasDatabaseConfig,
-}, async () => {
-  const result = await initializeDatabase();
+  return {
+    id: row.id,
+    nome: row.nome,
+    cognome: row.cognome,
+    email: row.email,
+    tipoRuolo: row.tipo_ruolo,
+    dataRegistrazione: row.data_registrazione,
+    quartiereId: row.fk_quartiere,
+  };
+}
 
-  assert.equal(result.status, 'ok');
-  assert.match(result.message, /Database schema initialized successfully/i);
+export function signToken(user) {
+  return jwt.sign(
+    {
+      sub: String(user.id),
+      email: user.email,
+      role: user.tipoRuolo,
+    },
+    config.jwtSecret,
+    { expiresIn: config.jwtExpiresIn }
+  );
+}
 
-  const tables = await pool.query(`
-    SELECT table_name
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_name IN (
-        'quartiere',
-        'utente',
-        'categoria',
-        'segnalazione',
-        'allegato_multimediale',
-        'sostegno',
-        'dossier',
-        'dossier_segnalazione'
-      )
-    ORDER BY table_name;
-  `);
+export function verifyToken(token) {
+  return jwt.verify(token, config.jwtSecret);
+}
 
-  assert.deepEqual(
-    tables.rows.map((row) => row.table_name),
-    [
-      'allegato_multimediale',
-      'categoria',
-      'dossier',
-      'dossier_segnalazione',
-      'quartiere',
-      'segnalazione',
-      'sostegno',
-      'utente',
-    ]
+export async function getUserById(userId) {
+  if (!pool) {
+    throw new AppError(503, 'DB_NOT_CONFIGURED', 'Database is not configured.');
+  }
+
+  const result = await pool.query(
+    `SELECT id, nome, cognome, email, tipo_ruolo, data_registrazione, fk_quartiere
+     FROM utente
+     WHERE id = $1;`,
+    [userId]
   );
 
-  const insertQuartiere = await pool.query(
-    `INSERT INTO quartiere (nome_quartiere, cap_zona)
-     VALUES ('Quartiere Test', '00100')
-     ON CONFLICT (nome_quartiere, cap_zona) DO NOTHING
-     RETURNING id;`
-  );
+  return sanitizeUser(result.rows[0] ?? null);
+}
 
-  const quartiereId = insertQuartiere.rows[0]?.id ?? (
-    await pool.query(`SELECT id FROM quartiere WHERE nome_quartiere = 'Quartiere Test' AND cap_zona = '00100';`)
-  ).rows[0].id;
+export async function registerUser({ nome, cognome, email, password, tipoRuolo, quartiereId }) {
+  if (!pool) {
+    throw new AppError(503, 'DB_NOT_CONFIGURED', 'Database is not configured.');
+  }
 
-  const insertCategoria = await pool.query(
-    `INSERT INTO categoria (nome_categoria, descrizione)
-     VALUES ('Buche stradali', 'Criticità relative alla viabilità urbana.')
-     ON CONFLICT (nome_categoria) DO NOTHING
-     RETURNING id;`
-  );
+  const safeNome = String(nome ?? '').trim();
+  const safeCognome = String(cognome ?? '').trim();
+  const safeEmail = String(email ?? '').trim().toLowerCase();
+  const safePassword = String(password ?? '');
+  const safeTipoRuolo = String(tipoRuolo ?? 'Cittadino').trim();
+  const safeQuartiereId = Number(quartiereId ?? 0);
 
-  const categoriaId = insertCategoria.rows[0]?.id ?? (
-    await pool.query(`SELECT id FROM categoria WHERE nome_categoria = 'Buche stradali';`)
-  ).rows[0].id;
+  if (!safeNome || !safeCognome || !safeEmail || !safePassword) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Nome, cognome, email e password sono obbligatori.');
+  }
 
-  const insertUser = await pool.query(
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(safeEmail)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Il campo email non è valido.');
+  }
+
+  if (safePassword.length < 8) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'La password deve contenere almeno 8 caratteri.');
+  }
+
+  if (!VALID_ROLES.includes(safeTipoRuolo)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Ruolo non valido. Ruoli supportati: Cittadino, MembroComitato, Admin.');
+  }
+
+  if (!Number.isInteger(safeQuartiereId) || safeQuartiereId <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Il quartiere è obbligatorio e deve essere un ID valido.');
+  }
+
+  const existingUser = await pool.query('SELECT id FROM utente WHERE email = $1;', [safeEmail]);
+  if (existingUser.rowCount > 0) {
+    throw new AppError(409, 'EMAIL_EXISTS', 'Esiste già un account con questa email.');
+  }
+
+  const quartiereCheck = await pool.query('SELECT id FROM quartiere WHERE id = $1;', [safeQuartiereId]);
+  if (quartiereCheck.rowCount === 0) {
+    throw new AppError(400, 'INVALID_QUARTIERE', 'Il quartiere specificato non esiste.');
+  }
+
+  const passwordHash = await bcrypt.hash(safePassword, 10);
+
+  const result = await pool.query(
     `INSERT INTO utente (nome, cognome, email, password_hash, tipo_ruolo, fk_quartiere)
-     VALUES ('Mario', 'Rossi', 'mario.rossi.test@example.com', 'hashed_password', 'Cittadino', $1)
-     ON CONFLICT (email) DO NOTHING
-     RETURNING id;`,
-    [quartiereId]
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, nome, cognome, email, tipo_ruolo, data_registrazione, fk_quartiere;`,
+    [safeNome, safeCognome, safeEmail, passwordHash, safeTipoRuolo, safeQuartiereId]
   );
 
-  const userId = insertUser.rows[0]?.id ?? (
-    await pool.query(`SELECT id FROM utente WHERE email = 'mario.rossi.test@example.com';`)
-  ).rows[0].id;
+  return {
+    user: sanitizeUser(result.rows[0]),
+    token: signToken(sanitizeUser(result.rows[0])),
+  };
+}
 
-  const insertSegnalazione = await pool.query(
-    `INSERT INTO segnalazione (
-       titolo,
-       descrizione_testuale,
-       latitudine,
-       longitudine,
-       indirizzo,
-       fk_utente_autore,
-       fk_categoria,
-       fk_quartiere
-     ) VALUES (
-       'Buche in via Test',
-       'La strada presenta diverse buche e rischio per i pedoni.',
-       45.123456,
-       9.123456,
-       'Via Test 1',
-       $1,
-       $2,
-       $3
-     ) RETURNING id;`,
-    [userId, categoriaId, quartiereId]
+export async function loginUser({ email, password }) {
+  if (!pool) {
+    throw new AppError(503, 'DB_NOT_CONFIGURED', 'Database is not configured.');
+  }
+
+  const safeEmail = String(email ?? '').trim().toLowerCase();
+  const safePassword = String(password ?? '');
+
+  if (!safeEmail || !safePassword) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Email e password sono obbligatori.');
+  }
+
+  const result = await pool.query(
+    `SELECT id, nome, cognome, email, password_hash, tipo_ruolo, data_registrazione, fk_quartiere
+     FROM utente
+     WHERE email = $1;`,
+    [safeEmail]
   );
 
-  const segnalazioneId = insertSegnalazione.rows[0].id;
+  const userRow = result.rows[0];
+  if (!userRow) {
+    throw new AppError(401, 'INVALID_CREDENTIALS', 'Credenziali non valide.');
+  }
 
-  await pool.query(
-    `INSERT INTO sostegno (fk_utente, fk_segnalazione)
-     VALUES ($1, $2)
-     ON CONFLICT (fk_utente, fk_segnalazione) DO NOTHING;`,
-    [userId, segnalazioneId]
-  );
+  const isValidPassword = await bcrypt.compare(safePassword, userRow.password_hash);
+  if (!isValidPassword) {
+    throw new AppError(401, 'INVALID_CREDENTIALS', 'Credenziali non valide.');
+  }
 
-  const supportCheck = await pool.query(
-    `SELECT COUNT(*)::int AS count FROM sostegno WHERE fk_segnalazione = $1;`,
-    [segnalazioneId]
-  );
+  const user = sanitizeUser(userRow);
 
-  assert.equal(supportCheck.rows[0].count, 1);
-});
+  return {
+    user,
+    token: signToken(user),
+  };
+}

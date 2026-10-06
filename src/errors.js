@@ -1,50 +1,20 @@
-export class AppError extends Error {
-  constructor(statusCode, code, message, details = null) {
-    super(message);
-    this.name = 'AppError';
-    this.statusCode = statusCode;
-    this.code = code;
-    this.details = details;
-  }
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const rawPort = Number(process.env.PORT ?? 3000);
+
+if (!Number.isInteger(rawPort) || rawPort <= 0) {
+  throw new Error('PORT must be a valid integer greater than 0.');
 }
 
-export function notFoundHandler(req, res) {
-  res.status(404).json({
-    success: false,
-    error: {
-      code: 'NOT_FOUND',
-      message: `Route not found: ${req.method} ${req.originalUrl}`,
-    },
-  });
-}
+const config = {
+  appName: process.env.APP_NAME ?? 'Verifica Ritorno Scuola',
+  environment: process.env.NODE_ENV ?? 'development',
+  port: rawPort,
+  databaseUrl: process.env.DATABASE_URL ?? '',
+  jwtSecret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
+};
 
-export function errorHandler(err, req, res, next) {
-  if (res.headersSent) {
-    return next(err);
-  }
-
-  const statusCode = err.statusCode ?? 500;
-  const code = err.code ?? 'INTERNAL_SERVER_ERROR';
-  const message = err.message ?? 'Unexpected server error.';
-
-  const response = {
-    success: false,
-    error: {
-      code,
-      message,
-    },
-  };
-
-  if (err.details) {
-    response.error.details = err.details;
-  }
-
-  if (statusCode >= 500) {
-    // Avoid leaking internals in production, but keep the service diagnosable.
-    if (process.env.NODE_ENV !== 'production') {
-      response.error.stack = err.stack;
-    }
-  }
-
-  res.status(statusCode).json(response);
-}
+export default config;

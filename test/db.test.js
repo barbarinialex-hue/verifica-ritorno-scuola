@@ -1,15 +1,47 @@
-import { initializeDatabase } from './db.js';
-
-async function main() {
-  try {
-    const result = await initializeDatabase();
-    console.log(result.message);
-    process.exitCode = 0;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown database initialization error.';
-    console.error(`Database initialization failed: ${message}`);
-    process.exitCode = 1;
+export class AppError extends Error {
+  constructor(statusCode, code, message, details = null) {
+    super(message);
+    this.name = 'AppError';
+    this.statusCode = statusCode;
+    this.code = code;
+    this.details = details;
   }
 }
 
-main();
+export function notFoundHandler(req, res) {
+  res.status(404).json({
+    success: false,
+    error: {
+      code: 'NOT_FOUND',
+      message: `Route not found: ${req.method} ${req.originalUrl}`,
+    },
+  });
+}
+
+export function errorHandler(err, req, res, next) {
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  const statusCode = err.statusCode ?? 500;
+  const code = err.code ?? 'INTERNAL_SERVER_ERROR';
+  const message = err.message ?? 'Unexpected server error.';
+
+  const response = {
+    success: false,
+    error: {
+      code,
+      message,
+    },
+  };
+
+  if (err.details) {
+    response.error.details = err.details;
+  }
+
+  if (statusCode >= 500 && process.env.NODE_ENV !== 'production') {
+    response.error.stack = err.stack;
+  }
+
+  res.status(statusCode).json(response);
+}
