@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}Segnalazioni · Verifica Ritorno Scuola{% endblock %}
+{% block content %}
+<section class="page-heading d-flex flex-wrap justify-content-between align-items-end gap-3">
+  <div><p class="eyebrow">Piattaforma civica</p><h1 class="page-title">Segnalazioni del territorio</h1><p class="lead-copy">Consulta i problemi segnalati e segui gli aggiornamenti.</p></div>
+  {% if current_user %}<a class="btn btn-primary" href="{{ url_for('reports.create') }}">Nuova segnalazione <span aria-hidden="true">+</span></a>{% endif %}
+</section>
+<form class="filter-bar row g-2 align-items-end" method="get">
+  <div class="col-12 col-md-4"><label class="form-label" for="f-quartiere">Quartiere</label><select class="form-select" id="f-quartiere" name="quartiere"><option value="">Tutti</option>{% for item in quartieri %}<option value="{{ item.id }}" {% if request.args.get('quartiere') == item.id|string %}selected{% endif %}>{{ item.nome_quartiere }}</option>{% endfor %}</select></div>
+  <div class="col-12 col-md-3"><label class="form-label" for="f-categoria">Categoria</label><select class="form-select" id="f-categoria" name="categoria"><option value="">Tutte</option>{% for item in categorie %}<option value="{{ item.id }}" {% if request.args.get('categoria') == item.id|string %}selected{% endif %}>{{ item.nome_categoria }}</option>{% endfor %}</select></div>
+  <div class="col-12 col-md-3"><label class="form-label" for="f-stato">Stato</label><select class="form-select" id="f-stato" name="stato"><option value="">Tutti</option>{% for state in stati %}<option {% if request.args.get('stato') == state %}selected{% endif %}>{{ state }}</option>{% endfor %}</select></div>
+  <div class="col-6 col-md-1"><button class="btn btn-dark w-100" type="submit" aria-label="Applica filtri">Filtra</button></div>
+  <div class="col-6 col-md-1"><a class="btn btn-outline-secondary w-100" href="{{ url_for('reports.index') }}" aria-label="Azzera filtri">Azzera</a></div>
+</form>
+<div class="result-summary"><span>{{ pagination.total }} risultati</span><span>Ordinate dalla più recente</span></div>
+{% if pagination.items %}
+  <div class="report-list">{% for report in pagination.items %}
+    <article class="report-row">
+      <div class="report-row-main"><div class="report-meta"><span class="status-label">{{ report.stato_attuale }}</span><span>{{ report.categoria.nome_categoria }}</span><span>{{ report.quartiere.nome_quartiere }}</span></div><h2><a href="{{ url_for('reports.detail', report_id=report.id) }}">{{ report.titolo }}</a></h2><p>{{ report.descrizione_testuale|truncate(220) }}</p><div class="report-submeta"><span>{{ report.indirizzo }}</span><span>{{ report.data_creazione.strftime('%d/%m/%Y') }}</span></div></div>
+      <a class="row-arrow" href="{{ url_for('reports.detail', report_id=report.id) }}" aria-label="Apri {{ report.titolo }}">→</a>
+    </article>
+  {% endfor %}</div>
+  {% if pagination.pages > 1 %}<nav class="mt-4" aria-label="Pagine segnalazioni"><ul class="pagination">{% for page in pagination.iter_pages() %}{% if page %}<li class="page-item {% if page == pagination.page %}active{% endif %}"><a class="page-link" href="{{ url_for('reports.index', page=page, quartiere=request.args.get('quartiere'), categoria=request.args.get('categoria'), stato=request.args.get('stato')) }}">{{ page }}</a></li>{% else %}<li class="page-item disabled"><span class="page-link">…</span></li>{% endif %}{% endfor %}</ul></nav>{% endif %}
+{% else %}<div class="empty-state"><span class="empty-rule"></span><h2>Nessuna segnalazione trovata</h2><p>Prova a modificare i filtri o torna più tardi.</p></div>{% endif %}
+{% endblock %}
