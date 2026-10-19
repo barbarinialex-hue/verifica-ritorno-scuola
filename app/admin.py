@@ -11,8 +11,11 @@ ROLES = ["Cittadino", "MembroComitato", "Admin"]
 @bp.route("/amministrazione/utenti")
 @roles_required("Admin")
 def users():
-    users = Utente.query.order_by(Utente.cognome, Utente.nome).all()
-    return render_template("admin/users.html", users=users, roles=ROLES)
+    page = max(request.args.get("page", 1, type=int), 1)
+    pagination = Utente.query.order_by(Utente.cognome, Utente.nome).paginate(
+        page=page, per_page=50, error_out=False
+    )
+    return render_template("admin/users.html", users=pagination.items, pagination=pagination, roles=ROLES)
 
 
 @bp.route("/amministrazione/utenti/<int:user_id>/ruolo", methods=["POST"])

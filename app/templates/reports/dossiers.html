@@ -1,3 +1,45 @@
 {% extends 'base.html' %}
 {% block title %}Dossier · Verifica Ritorno Scuola{% endblock %}
-{% block content %}<section class="page-heading"><p class="eyebrow">Area comitato</p><h1 class="page-title">Dossier</h1><p class="lead-copy">Raccogli le segnalazioni in dossier tematici.</p></section><div class="two-column-content"><form method="post" class="form-panel"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><h2 class="section-title">Crea dossier</h2><div class="mb-3"><label class="form-label" for="titolo">Titolo</label><input class="form-control" id="titolo" name="titolo" maxlength="180" required></div><div class="mb-3"><label class="form-label" for="note">Note del comitato</label><textarea class="form-control" id="note" name="note_comitato" rows="3"></textarea></div><button class="btn btn-primary" type="submit">Crea dossier</button></form><section><h2 class="section-title">Dossier esistenti</h2><div class="report-list">{% for dossier in dossiers %}<article class="report-row"><div class="report-row-main"><div class="report-meta"><span>{{ dossier.data_creazione.strftime('%d/%m/%Y') }}</span><span>{{ dossier.elementi|length }} segnalazioni</span></div><h3><a href="{{ url_for('reports.dossier_detail', dossier_id=dossier.id) }}">{{ dossier.titolo }}</a></h3>{% if dossier.note_comitato %}<p>{{ dossier.note_comitato|truncate(150) }}</p>{% endif %}</div></article>{% else %}<p class="muted-copy">Non ci sono ancora dossier.</p>{% endfor %}</div></section></div>{% endblock %}
+{% block content %}
+<section class="page-heading">
+	<p class="eyebrow">Area comitato</p>
+	<h1 class="page-title">Dossier</h1>
+	<p class="lead-copy">Raccogli le segnalazioni in dossier tematici.</p>
+</section>
+<div class="two-column-content">
+	<form method="post" class="form-panel align-self-start">
+		<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+		<h2 class="section-title">Crea dossier</h2>
+		<div class="mb-3"><label class="form-label" for="titolo">Titolo</label><input class="form-control" id="titolo" name="titolo" maxlength="180" required></div>
+		<div class="mb-3">
+			<label class="form-label" for="note">Note del comitato</label>
+			<textarea class="form-control" id="note" name="note_comitato" rows="3" maxlength="5000"></textarea>
+			<div class="form-text">Massimo 5000 caratteri.</div>
+		</div>
+		<button class="btn btn-primary" type="submit">Crea dossier</button>
+	</form>
+	<section>
+		<h2 class="section-title">Dossier esistenti</h2>
+		<div class="report-list">
+			{% for dossier, report_count in pagination.items %}
+				<article class="report-row">
+					<div class="report-row-main">
+						<div class="report-meta"><span>{{ dossier.data_creazione.strftime('%d/%m/%Y') }}</span><span>{{ report_count }} segnalazioni</span></div>
+						<h3><a href="{{ url_for('reports.dossier_detail', dossier_id=dossier.id) }}">{{ dossier.titolo }}</a></h3>
+						{% if dossier.note_comitato %}<p>{{ dossier.note_comitato|truncate(150) }}</p>{% endif %}
+					</div>
+				</article>
+			{% else %}
+				<p class="muted-copy">Non ci sono ancora dossier.</p>
+			{% endfor %}
+		</div>
+		{% if pagination.pages > 1 %}
+			<nav class="mt-4 d-flex justify-content-between" aria-label="Pagine dossier">
+				{% if pagination.has_prev %}<a class="btn btn-outline-secondary" href="{{ url_for('reports.dossiers', page=pagination.prev_num) }}">Precedente</a>{% else %}<span></span>{% endif %}
+				<span aria-current="page">Pagina {{ pagination.page }} di {{ pagination.pages }}</span>
+				{% if pagination.has_next %}<a class="btn btn-outline-secondary" href="{{ url_for('reports.dossiers', page=pagination.next_num) }}">Successiva</a>{% else %}<span></span>{% endif %}
+			</nav>
+		{% endif %}
+	</section>
+</div>
+{% endblock %}

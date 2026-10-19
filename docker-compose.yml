@@ -23,6 +23,8 @@ services:
       db:
         condition: service_healthy
     environment:
+      APP_ENV: ${APP_ENV:-development}
+      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-memory://}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
       JWT_COOKIE_SECURE: ${JWT_COOKIE_SECURE:-0}

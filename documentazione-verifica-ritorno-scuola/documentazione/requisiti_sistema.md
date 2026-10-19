@@ -15,11 +15,11 @@ Specifiche da soddisfare e verificare durante il ripristino e lo sviluppo. La pr
 | RF-07 | Garantire un solo sostegno per coppia utente-segnalazione anche con richieste simultanee | RU-07 |
 | RF-08 | Gestire stati, duplicati e dossier con autorizzazione del comitato o amministratore | RU-09, RU-10, RU-11 |
 | RF-09 | Consentire l'aggiornamento dei ruoli solo agli amministratori | RU-12 |
-| RF-10 | Esporre controlli di salute del servizio e della connessione PostgreSQL | Gestione tecnica |
+| RF-10 | Esporre controlli di salute del servizio e della connessione MySQL | Gestione tecnica |
 
 ## Dati e vincoli
 
-- Persistenza in PostgreSQL delle otto tabelle descritte nel modello logico.
+- Persistenza in MySQL delle otto tabelle descritte nel modello logico e gestite tramite Alembic/Flask-Migrate.
 - Email univoca; normalizzazione in minuscolo prima della memorizzazione.
 - Chiavi esterne valide e campi obbligatori non nulli.
 - Coordinate comprese negli intervalli [-90, 90] e [-180, 180].
@@ -47,16 +47,16 @@ Non sono definiti obiettivi numerici di utenti simultanei, latenza o disponibili
 
 | Componente | Requisito |
 | --- | --- |
-| Sistema operativo di sviluppo | Windows, macOS o Linux compatibile con il runtime scelto |
-| Runtime | Node.js >= 20, come indicato nel materiale del repository; compatibilità effettiva da verificare dopo il ripristino |
-| Gestione pacchetti | npm con un package.json valido |
-| Backend | Express 4; pg; dotenv; bcryptjs; jsonwebtoken; multer per upload |
-| Database | PostgreSQL 16, scelta documentata nel progetto |
-| Strumenti SQL | psql oppure un client PostgreSQL equivalente |
-| Container | Docker e Compose opzionali; il file Compose attuale richiede correzione |
-| Test | Node test runner e Supertest |
-| Client attuale previsto | Client HTTP per le API; un'interfaccia web non è presente nell'albero esaminato |
-| Porte previste | Applicazione 3000 e PostgreSQL 5432, configurabili |
-| Archiviazione | Spazio scrivibile per allegati e spazio persistente per PostgreSQL |
+| Sistema operativo di sviluppo | Linux, macOS o Windows con ambiente Python compatibile |
+| Runtime | Python >= 3.11 |
+| Gestione dipendenze | pip e `requirements.txt` |
+| Backend | Flask, Flask-SQLAlchemy, Flask-Migrate, Flask-JWT-Extended e Flask-WTF |
+| Database | MySQL 8.0/8.4 in sviluppo e produzione; SQLite isolato nei test |
+| Interfaccia | HTML/Jinja, CSS, JavaScript e Bootstrap 5, renderizzati dal server |
+| Container | Docker e Docker Compose; MySQL e upload usano volumi persistenti |
+| Test | pytest; la suite corrente usa SQLite e non sostituisce i test d'integrazione MySQL |
+| Server | Flask per sviluppo; Gunicorn dietro HTTPS/reverse proxy in produzione |
+| Porte predefinite | Flask 5000 in locale; Docker 8000 per l'app e 3306 per MySQL |
+| Archiviazione | Directory configurabile per gli upload; volume persistente in Compose |
 
-Non sono disponibili misurazioni per stabilire minimi hardware attendibili di RAM, CPU e spazio disco.
+Le variabili d'ambiente, l'avvio locale, Docker, migrazioni e test sono descritti nel [README](../../README.md). Non sono disponibili misurazioni per stabilire minimi hardware attendibili di RAM, CPU e spazio disco.

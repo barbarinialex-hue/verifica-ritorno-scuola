@@ -1,3 +1,41 @@
 {% extends 'base.html' %}
 {% block title %}Gestione utenti · Verifica Ritorno Scuola{% endblock %}
-{% block content %}<section class="page-heading"><p class="eyebrow">Amministrazione</p><h1 class="page-title">Gestione ruoli</h1><p class="lead-copy">Le modifiche ai privilegi sono riservate agli amministratori.</p></section><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Utente</th><th>Quartiere</th><th>Registrazione</th><th>Ruolo</th></tr></thead><tbody>{% for user in users %}<tr><td>{{ user.nome }} {{ user.cognome }}<small class="d-block text-secondary">{{ user.email }}</small></td><td>{{ user.quartiere.nome_quartiere }}</td><td>{{ user.data_registrazione.strftime('%d/%m/%Y') }}</td><td><form method="post" action="{{ url_for('admin.update_role', user_id=user.id) }}" class="d-flex gap-2"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><select class="form-select form-select-sm" name="tipo_ruolo" aria-label="Ruolo di {{ user.email }}">{% for role in roles %}<option {% if role == user.tipo_ruolo %}selected{% endif %}>{{ role }}</option>{% endfor %}</select><button class="btn btn-sm btn-dark" type="submit">Aggiorna</button></form></td></tr>{% endfor %}</tbody></table></div>{% endblock %}
+{% block content %}
+<section class="page-heading">
+	<p class="eyebrow">Amministrazione</p>
+	<h1 class="page-title">Gestione ruoli</h1>
+	<p class="lead-copy">Le modifiche ai privilegi sono riservate agli amministratori.</p>
+</section>
+<div class="table-responsive">
+	<table class="table align-middle">
+		<thead><tr><th>Utente</th><th>Quartiere</th><th>Registrazione</th><th>Ruolo</th></tr></thead>
+		<tbody>
+			{% for user in users %}
+				<tr>
+					<td>{{ user.nome }} {{ user.cognome }}<small class="d-block text-secondary">{{ user.email }}</small></td>
+					<td>{{ user.quartiere.nome_quartiere }}</td>
+					<td>{{ user.data_registrazione.strftime('%d/%m/%Y') }}</td>
+					<td>
+						<form method="post" action="{{ url_for('admin.update_role', user_id=user.id) }}" class="d-flex gap-2">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+							<select class="form-select form-select-sm" name="tipo_ruolo" aria-label="Ruolo di {{ user.email }}">
+								{% for role in roles %}<option {% if role == user.tipo_ruolo %}selected{% endif %}>{{ role }}</option>{% endfor %}
+							</select>
+							<button class="btn btn-sm btn-dark" type="submit">Aggiorna</button>
+						</form>
+					</td>
+				</tr>
+			{% else %}
+				<tr><td colspan="4">Nessun utente trovato.</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>
+{% if pagination.pages > 1 %}
+	<nav class="mt-4 d-flex justify-content-between" aria-label="Pagine utenti">
+		{% if pagination.has_prev %}<a class="btn btn-outline-secondary" href="{{ url_for('admin.users', page=pagination.prev_num) }}">Precedente</a>{% else %}<span></span>{% endif %}
+		<span aria-current="page">Pagina {{ pagination.page }} di {{ pagination.pages }}</span>
+		{% if pagination.has_next %}<a class="btn btn-outline-secondary" href="{{ url_for('admin.users', page=pagination.next_num) }}">Successiva</a>{% else %}<span></span>{% endif %}
+	</nav>
+{% endif %}
+{% endblock %}

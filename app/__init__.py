@@ -8,9 +8,10 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 import sqlite3
 
-from app.extensions import csrf, db, jwt, migrate
+from app.extensions import csrf, db, jwt, limiter, migrate, oauth
 from app import models  # noqa: F401
 
 
@@ -50,28 +51,70 @@ def normalize_database_url(raw_url):
     return cleaned_url, connect_args
 
 
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def create_app(test_config=None):
     project_root = Path(__file__).resolve().parent.parent
     load_dotenv(project_root / ".env")
+
+    supplied_config = test_config or {}
+    google_client_id = supplied_config.get("GOOGLE_CLIENT_ID", os.getenv("GOOGLE_CLIENT_ID", ""))
+    google_client_secret = supplied_config.get("GOOGLE_CLIENT_SECRET", os.getenv("GOOGLE_CLIENT_SECRET", ""))
+    app_env = str(supplied_config.get("APP_ENV", os.getenv("APP_ENV", "development"))).strip().lower()
+    secret_key = supplied_config.get("SECRET_KEY") or os.getenv("SECRET_KEY")
+    jwt_secret_key = supplied_config.get("JWT_SECRET_KEY") or os.getenv("JWT_SECRET_KEY")
+    secure_cookie_setting = supplied_config.get(
+        "JWT_COOKIE_SECURE",
+        os.getenv("JWT_COOKIE_SECURE", "1" if app_env == "production" else "0"),
+    )
+    jwt_cookie_secure = parse_bool(secure_cookie_setting)
+    rate_limit_storage_uri = supplied_config.get(
+        "RATELIMIT_STORAGE_URI",
+        os.getenv("RATELIMIT_STORAGE_URI", "memory://"),
+    )
+    if app_env == "production":
+        if not secret_key or not jwt_secret_key:
+            raise RuntimeError("SECRET_KEY e JWT_SECRET_KEY devono essere configurate in produzione.")
+        if not jwt_cookie_secure:
+            raise RuntimeError("JWT_COOKIE_SECURE deve essere attivo in produzione con HTTPS.")
+        if rate_limit_storage_uri.startswith("memory://"):
+            raise RuntimeError("In produzione RATELIMIT_STORAGE_URI deve indicare uno storage condiviso.")
 
     candidate_database_url = (test_config or {}).get("SQLALCHEMY_DATABASE_URI") or os.getenv("DATABASE_URL", "sqlite:///verifica_ritorno_scuola.db")
     database_url, db_connect_args = normalize_database_url(candidate_database_url)
 
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_mapping(
-        SECRET_KEY=os.getenv("SECRET_KEY") or secrets.token_hex(32),
+        APP_ENV=app_env,
+        RATELIMIT_STORAGE_URI=rate_limit_storage_uri,
+        SECRET_KEY=secret_key or secrets.token_hex(32),
         SQLALCHEMY_DATABASE_URI=database_url,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SQLALCHEMY_ENGINE_OPTIONS={"connect_args": db_connect_args} if db_connect_args else {},
-        JWT_SECRET_KEY=os.getenv("JWT_SECRET_KEY") or secrets.token_hex(32),
+        JWT_SECRET_KEY=jwt_secret_key or secrets.token_hex(32),
         JWT_TOKEN_LOCATION=["cookies"],
         JWT_ACCESS_COOKIE_NAME="access_token_cookie",
         JWT_COOKIE_CSRF_PROTECT=False,
-        JWT_COOKIE_SECURE=os.getenv("JWT_COOKIE_SECURE", "0").lower() in {"1", "true", "yes"},
+        JWT_COOKIE_SECURE=jwt_cookie_secure,
         JWT_COOKIE_SAMESITE="Lax",
         JWT_ACCESS_TOKEN_EXPIRES=60 * 60 * 8,
         MAX_CONTENT_LENGTH=int(os.getenv("MAX_CONTENT_LENGTH", str(16 * 1024 * 1024))),
         UPLOAD_FOLDER=os.getenv("UPLOAD_FOLDER", "instance/uploads"),
+        GOOGLE_CLIENT_ID=google_client_id,
+        GOOGLE_CLIENT_SECRET=google_client_secret,
+        GOOGLE_OAUTH_ENABLED=bool(google_client_id and google_client_secret),
+        PUBLIC_BASE_URL=os.getenv("PUBLIC_BASE_URL", "").rstrip("/"),
+        SMTP_HOST=os.getenv("SMTP_HOST", ""),
+        SMTP_PORT=int(os.getenv("SMTP_PORT", "587")),
+        SMTP_USERNAME=os.getenv("SMTP_USERNAME", ""),
+        SMTP_PASSWORD=os.getenv("SMTP_PASSWORD", ""),
+        SMTP_USE_TLS=parse_bool(os.getenv("SMTP_USE_TLS", "1")),
+        SMTP_USE_SSL=parse_bool(os.getenv("SMTP_USE_SSL", "0")),
+        MAIL_FROM=os.getenv("MAIL_FROM", ""),
     )
     if test_config:
         app.config.update(test_config)
@@ -87,13 +130,18 @@ def create_app(test_config=None):
 
     db.init_app(app)
     migrate.init_app(app, db, compare_server_default=True)
-    with app.app_context():
-        try:
-            db.create_all()
-        except Exception:
-            app.logger.exception("Impossibile creare automaticamente le tabelle mancanti del database.")
     jwt.init_app(app)
+    limiter.init_app(app)
     csrf.init_app(app)
+    oauth.init_app(app)
+    if app.config["GOOGLE_OAUTH_ENABLED"]:
+        oauth.register(
+            name="google",
+            client_id=app.config["GOOGLE_CLIENT_ID"],
+            client_secret=app.config["GOOGLE_CLIENT_SECRET"],
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile"},
+        )
 
     from app.auth import bp as auth_bp
     from app.reports import bp as reports_bp
@@ -102,6 +150,11 @@ def create_app(test_config=None):
     app.register_blueprint(auth_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(admin_bp)
+
+    @app.after_request
+    def set_referrer_policy(response):
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        return response
 
     @jwt.unauthorized_loader
     def missing_token(_reason):
@@ -124,6 +177,10 @@ def create_app(test_config=None):
     def too_large(_error):
         return render_template("error.html", message="Il file supera la dimensione massima consentita."), 413
 
+    @app.errorhandler(429)
+    def rate_limited(_error):
+        return render_template("error.html", message="Hai effettuato troppi tentativi. Riprova più tardi."), 429
+
     @app.errorhandler(404)
     def not_found(_error):
         return render_template("error.html", message="La pagina richiesta non esiste."), 404
@@ -137,7 +194,7 @@ def create_app(test_config=None):
     def health():
         try:
             db.session.execute(text("SELECT 1"))
-        except Exception:
+        except SQLAlchemyError:
             db.session.rollback()
             return jsonify(status="degraded", database="unavailable"), 503
         return jsonify(status="ok", database="connected")

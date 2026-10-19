@@ -1,4 +1,3 @@
-from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from pathlib import Path
@@ -6,10 +5,12 @@ from uuid import uuid4
 import warnings
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, send_from_directory, url_for
-from flask_jwt_extended import get_jwt_identity, jwt_required, verify_jwt_in_request
+from flask_jwt_extended import jwt_required, verify_jwt_in_request
+from flask_jwt_extended.exceptions import JWTExtendedException
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import func, select
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import contains_eager, selectinload
 from werkzeug.utils import secure_filename
 
 from app.extensions import db
@@ -19,6 +20,7 @@ from app.security import can_manage_report, current_user_from_token, roles_requi
 bp = Blueprint("reports", __name__)
 
 STATES = ["Inviata", "Approvata", "Presa in Carico", "Inclusa nel Dossier", "Risolta"]
+MAX_TEXT_LENGTH = 5000
 ALLOWED = {
     ".jpg": ("Foto", "image"),
     ".jpeg": ("Foto", "image"),
@@ -67,31 +69,72 @@ def get_report_form_data():
 
     if not title or len(title) > 180 or not description or not address or len(address) > 255:
         raise ValueError("Compila titolo, descrizione e indirizzo rispettando le lunghezze indicate.")
+    if len(description) > MAX_TEXT_LENGTH:
+        raise ValueError(f"La descrizione non può superare {MAX_TEXT_LENGTH} caratteri.")
+    if not latitude.is_finite() or not longitude.is_finite():
+        raise ValueError("Inserisci coordinate numeriche valide.")
     if latitude.as_tuple().exponent < -6 or longitude.as_tuple().exponent < -6:
         raise ValueError("Le coordinate possono contenere al massimo sei cifre decimali.")
-    if not latitude.is_finite() or not longitude.is_finite() or not Decimal("-90") <= latitude <= Decimal("90") or not Decimal("-180") <= longitude <= Decimal("180"):
+    if not Decimal("-90") <= latitude <= Decimal("90") or not Decimal("-180") <= longitude <= Decimal("180"):
         raise ValueError("Le coordinate devono essere comprese negli intervalli geografici validi.")
     if not db.session.get(Categoria, category_id) or not db.session.get(Quartiere, neighborhood_id):
         raise ValueError("Seleziona una categoria e un quartiere validi.")
     return title, description, address, latitude, longitude, category_id, neighborhood_id
 
 
+def get_required_report_image():
+    uploaded = request.files.get("immagine")
+    if not uploaded or not uploaded.filename:
+        raise ValueError("Carica almeno una foto valida per inviare la segnalazione.")
+
+    extension = Path(secure_filename(uploaded.filename)).suffix.lower()
+    if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise ValueError("La foto deve essere in formato JPG, PNG o WebP.")
+    data = uploaded.stream.read(current_app.config["MAX_CONTENT_LENGTH"] + 1)
+    if len(data) > current_app.config["MAX_CONTENT_LENGTH"] or not valid_upload(extension, data):
+        raise ValueError("Il file immagine non è valido o supera la dimensione massima consentita.")
+    return extension, data
+
+
 def report_query():
-    query = Segnalazione.query.join(Categoria).join(Quartiere)
+    query = Segnalazione.query.join(Categoria).join(Quartiere).options(
+        contains_eager(Segnalazione.categoria),
+        contains_eager(Segnalazione.quartiere),
+        selectinload(Segnalazione.allegati),
+    )
     if request.args.get("quartiere", type=int):
         query = query.filter(Segnalazione.fk_quartiere == request.args.get("quartiere", type=int))
     if request.args.get("categoria", type=int):
         query = query.filter(Segnalazione.fk_categoria == request.args.get("categoria", type=int))
     if request.args.get("stato") in STATES:
         query = query.filter(Segnalazione.stato_attuale == request.args["stato"])
-    return query.order_by(Segnalazione.data_creazione.desc())
+    search = request.args.get("q", "").strip()
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(
+            Segnalazione.titolo.ilike(pattern),
+            Segnalazione.indirizzo.ilike(pattern),
+            Segnalazione.descrizione_testuale.ilike(pattern),
+        ))
+    return query.order_by(Segnalazione.data_creazione.desc(), Segnalazione.id.desc())
 
 
 @bp.route("/")
 def index():
     page = max(request.args.get("page", 1, type=int), 1)
     pagination = report_query().paginate(page=page, per_page=12, error_out=False)
-    return render_template("reports/index.html", pagination=pagination, categorie=Categoria.query.order_by(Categoria.nome_categoria).all(), quartieri=Quartiere.query.order_by(Quartiere.nome_quartiere).all(), stati=STATES)
+    map_points = [{
+        "id": report.id,
+        "latitude": float(report.latitudine),
+        "longitude": float(report.longitudine),
+        "title": report.titolo,
+        "address": report.indirizzo,
+        "category": report.categoria.nome_categoria,
+        "status": report.stato_attuale,
+        "image_url": next((item.url_file for item in report.allegati if item.tipo_file == "Foto"), None),
+        "url": url_for("reports.detail", report_id=report.id),
+    } for report in report_query().all()]
+    return render_template("reports/index.html", pagination=pagination, map_points=map_points, categorie=Categoria.query.order_by(Categoria.nome_categoria).all(), quartieri=Quartiere.query.order_by(Quartiere.nome_quartiere).all(), stati=STATES)
 
 
 @bp.route("/segnalazioni/<int:report_id>")
@@ -100,10 +143,13 @@ def detail(report_id):
     try:
         verify_jwt_in_request(optional=True)
         user = current_user_from_token()
-    except Exception:
+    except JWTExtendedException:
         user = None
     has_supported = bool(user and Sostegno.query.filter_by(fk_utente=user.id, fk_segnalazione=report.id).first())
-    return render_template("reports/detail.html", report=report, has_supported=has_supported)
+    support_count = db.session.query(func.count(Sostegno.id)).filter(
+        Sostegno.fk_segnalazione == report.id
+    ).scalar()
+    return render_template("reports/detail.html", report=report, has_supported=has_supported, support_count=support_count)
 
 
 @bp.route("/segnalazioni/nuova", methods=["GET", "POST"])
@@ -113,12 +159,30 @@ def create():
     if request.method == "POST":
         try:
             values = get_report_form_data()
+            image_extension, image_data = get_required_report_image()
         except ValueError as error:
             flash(str(error), "danger")
         else:
             report = Segnalazione(titolo=values[0], descrizione_testuale=values[1], indirizzo=values[2], latitudine=values[3], longitudine=values[4], fk_categoria=values[5], fk_quartiere=values[6], fk_utente_autore=user.id)
-            db.session.add(report)
-            db.session.commit()
+            filename = f"{uuid4().hex}{image_extension}"
+            destination = Path(current_app.config["UPLOAD_FOLDER"]) / filename
+            try:
+                destination.write_bytes(image_data)
+                db.session.add(report)
+                db.session.flush()
+                db.session.add(AllegatoMultimediale(
+                    url_file=f"/uploads/{filename}",
+                    tipo_file="Foto",
+                    fk_segnalazione=report.id,
+                ))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                try:
+                    destination.unlink(missing_ok=True)
+                except OSError:
+                    current_app.logger.exception("Impossibile rimuovere la foto dopo il fallimento della creazione.")
+                raise
             flash("Segnalazione inviata.", "success")
             return redirect(url_for("reports.detail", report_id=report.id))
     return render_report_form()
@@ -183,13 +247,16 @@ def upload(report_id):
         return redirect(url_for("reports.detail", report_id=report.id))
     filename = f"{uuid4().hex}{extension}"
     destination = Path(current_app.config["UPLOAD_FOLDER"]) / filename
-    destination.write_bytes(data)
-    db.session.add(AllegatoMultimediale(url_file=f"/uploads/{filename}", tipo_file=rule[0], fk_segnalazione=report.id))
     try:
+        destination.write_bytes(data)
+        db.session.add(AllegatoMultimediale(url_file=f"/uploads/{filename}", tipo_file=rule[0], fk_segnalazione=report.id))
         db.session.commit()
     except Exception:
         db.session.rollback()
-        destination.unlink(missing_ok=True)
+        try:
+            destination.unlink(missing_ok=True)
+        except OSError:
+            current_app.logger.exception("Impossibile rimuovere il file dopo il fallimento dell'upload.")
         raise
     flash("Allegato caricato.", "success")
     return redirect(url_for("reports.detail", report_id=report.id))
@@ -274,15 +341,27 @@ def dossiers():
     if request.method == "POST":
         title = request.form.get("titolo", "").strip()
         notes = request.form.get("note_comitato", "").strip() or None
-        if not title or len(title) > 180:
-            flash("Inserisci un titolo valido per il dossier.", "danger")
+        if not title or len(title) > 180 or (notes and len(notes) > MAX_TEXT_LENGTH):
+            flash(f"Inserisci un titolo valido e limita le note a {MAX_TEXT_LENGTH} caratteri.", "danger")
         else:
             dossier = Dossier(titolo=title, note_comitato=notes, fk_utente_creatore=user.id)
             db.session.add(dossier)
             db.session.commit()
             flash("Dossier creato.", "success")
             return redirect(url_for("reports.dossier_detail", dossier_id=dossier.id))
-    return render_template("reports/dossiers.html", dossiers=Dossier.query.order_by(Dossier.data_creazione.desc()).all())
+    page = max(request.args.get("page", 1, type=int), 1)
+    dossier_counts = db.session.query(
+        DossierSegnalazione.fk_dossier.label("dossier_id"),
+        func.count(DossierSegnalazione.fk_segnalazione).label("report_count"),
+    ).group_by(DossierSegnalazione.fk_dossier).subquery()
+    dossier_query = db.session.query(
+        Dossier,
+        func.coalesce(dossier_counts.c.report_count, 0).label("report_count"),
+    ).outerjoin(dossier_counts, dossier_counts.c.dossier_id == Dossier.id).order_by(
+        Dossier.data_creazione.desc(), Dossier.id.desc()
+    )
+    pagination = dossier_query.paginate(page=page, per_page=12, error_out=False)
+    return render_template("reports/dossiers.html", pagination=pagination)
 
 
 @bp.route("/dossier/<int:dossier_id>", methods=["GET", "POST"])

@@ -1,3 +1,38 @@
 {% extends 'base.html' %}
 {% block title %}Profilo · Verifica Ritorno Scuola{% endblock %}
-{% block content %}<section class="narrow-content"><p class="eyebrow">Area personale</p><h1 class="page-title">Il mio profilo</h1><dl class="profile-list"><div><dt>Nome</dt><dd>{{ user.nome }} {{ user.cognome }}</dd></div><div><dt>Email</dt><dd>{{ user.email }}</dd></div><div><dt>Quartiere</dt><dd>{{ user.quartiere.nome_quartiere }}</dd></div><div><dt>Ruolo</dt><dd>{{ user.tipo_ruolo }}</dd></div><div><dt>Registrato il</dt><dd>{{ user.data_registrazione.strftime('%d/%m/%Y') }}</dd></div></dl><h2 class="section-title mt-5">Le mie segnalazioni</h2><div class="report-list">{% for report in user.segnalazioni|sort(attribute='data_creazione', reverse=true) %}<article class="report-row"><div class="report-row-main"><div class="report-meta"><span class="status-label">{{ report.stato_attuale }}</span><span>{{ report.quartiere.nome_quartiere }}</span></div><h3><a href="{{ url_for('reports.detail', report_id=report.id) }}">{{ report.titolo }}</a></h3></div></article>{% else %}<p class="muted-copy">Non hai ancora inviato segnalazioni.</p>{% endfor %}</div></section>{% endblock %}
+{% block content %}
+<section class="narrow-content">
+	<p class="eyebrow">Area personale</p>
+	<h1 class="page-title">Il mio profilo</h1>
+	<dl class="profile-list">
+		<div><dt>Nome</dt><dd>{{ user.nome }} {{ user.cognome }}</dd></div>
+		<div><dt>Email</dt><dd>{{ user.email }}</dd></div>
+		<div><dt>Quartiere</dt><dd>{{ user.quartiere.nome_quartiere }}</dd></div>
+		<div><dt>Ruolo</dt><dd>{{ user.tipo_ruolo }}</dd></div>
+		<div><dt>Registrato il</dt><dd>{{ user.data_registrazione.strftime('%d/%m/%Y') }}</dd></div>
+	</dl>
+	<div class="d-flex justify-content-between align-items-baseline gap-3 mt-5">
+		<h2 class="section-title">Le mie segnalazioni</h2>
+		<span class="muted-copy">{{ pagination.total }} in totale</span>
+	</div>
+	<div class="report-list">
+		{% for report in pagination.items %}
+			<article class="report-row">
+				<div class="report-row-main">
+					<div class="report-meta"><span class="status-label">{{ report.stato_attuale }}</span><span>{{ report.quartiere.nome_quartiere }}</span></div>
+					<h3><a href="{{ url_for('reports.detail', report_id=report.id) }}">{{ report.titolo }}</a></h3>
+				</div>
+			</article>
+		{% else %}
+			<p class="muted-copy">Non hai ancora inviato segnalazioni.</p>
+		{% endfor %}
+	</div>
+	{% if pagination.pages > 1 %}
+		<nav class="mt-4 d-flex justify-content-between" aria-label="Pagine delle tue segnalazioni">
+			{% if pagination.has_prev %}<a class="btn btn-outline-secondary" href="{{ url_for('auth.profile', page=pagination.prev_num) }}">Precedente</a>{% else %}<span></span>{% endif %}
+			<span aria-current="page">Pagina {{ pagination.page }} di {{ pagination.pages }}</span>
+			{% if pagination.has_next %}<a class="btn btn-outline-secondary" href="{{ url_for('auth.profile', page=pagination.next_num) }}">Successiva</a>{% else %}<span></span>{% endif %}
+		</nav>
+	{% endif %}
+</section>
+{% endblock %}

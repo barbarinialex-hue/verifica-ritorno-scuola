@@ -14,7 +14,7 @@ erDiagram
     UTENTE ||--o{ DOSSIER : "1:N (COMPILA)"
     UTENTE ||--o{ SOSTEGNO : "1:N (ESPRIME)"
     CATEGORIA ||--o{ SEGNALAZIONE : "1:N (CLASSIFICA)"
-    SEGNALAZIONE ||--|{ ALLEGATO_MULTIMEDIALE : "1:N (CONTIENE)"
+    SEGNALAZIONE ||--o{ ALLEGATO_MULTIMEDIALE : "0:N (CONTIENE)"
     SEGNALAZIONE ||--o{ SOSTEGNO : "1:N (RICEVE)"
     SEGNALAZIONE o{--o| SEGNALAZIONE : "0,1:N (ACCORPA DUPLICATI)"
     DOSSIER ||--o{ DOSSIER_SEGNALAZIONE : "1:N (INCLUDE)"
@@ -56,7 +56,7 @@ Rappresenta le zone o quartieri del territorio comunale.
 | :--- | :--- | :--- |
 | `ID_Quartiere` | **PK** | Identificativo univoco del quartiere. |
 | `NomeQuartiere` | Non Nullo | Nome del quartiere (es. *Centro Storico*, *Quartiere Nord*). |
-| `Cap_Zona` | Opzionale | Codice di riferimento della zona oppure CAP del territorio. |
+| `Cap_Zona` | Non nullo | Codice di riferimento della zona oppure CAP del territorio; il dato segnaposto iniziale è `00000`. |
 
 ---
 
@@ -175,6 +175,6 @@ Tabella di giunzione per la relazione Molti-a-Molti ($N:M$) tra `DOSSIER` e `SEG
 | `UTENTE` | Creazione dossier | `DOSSIER` | $1:N$ | Un dossier è redatto da $1$ utente. |
 | `UTENTE` | Voto sostegno | `SOSTEGNO` | $1:N$ | Relazione gestita con vincolo UNIQUE su `(FK_Utente, FK_Segnalazione)`. |
 | `CATEGORIA` | Classificazione | `SEGNALAZIONE` | $1:N$ | Ogni segnalazione ha $1$ categoria associata. |
-| `SEGNALAZIONE` | Contenuto multimediale | `ALLEGATO_MULTIMEDIALE` | $1:N$ (Min. 1) | Ogni allegato appartiene a $1$ sola segnalazione. |
+| `SEGNALAZIONE` | Contenuto multimediale | `ALLEGATO_MULTIMEDIALE` | $0:N$ | Gli allegati sono facoltativi e ciascun allegato appartiene a una sola segnalazione. |
 | `SEGNALAZIONE` | Merge duplicati | `SEGNALAZIONE` | $0,1:N$ | Relazione ricorsiva padre-figlio. |
 | `DOSSIER` | Aggregazione | `SEGNALAZIONE` | $N:M$ | Realizzata tramite tabella di ponte `DOSSIER_SEGNALAZIONE`. |
